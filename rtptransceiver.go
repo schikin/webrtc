@@ -4,6 +4,7 @@ package webrtc
 
 import (
 	"fmt"
+	"github.com/pion/sdp/v2"
 )
 
 // RTPTransceiver represents a combination of an RTPSender and an RTPReceiver that share a common mid.
@@ -16,6 +17,12 @@ type RTPTransceiver struct {
 	// receptive bool
 	stopped bool
 	kind    RTPCodecType
+	iceParams ICEParameters
+
+	Mid string
+	LocalMediaDescription *sdp.MediaDescription
+	RemoteMediaDescription *sdp.MediaDescription
+
 }
 
 func (t *RTPTransceiver) setSendingTrack(track *Track) error {

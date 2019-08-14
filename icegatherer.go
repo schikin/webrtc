@@ -151,13 +151,16 @@ func (g *ICEGatherer) Gather() error {
 		onLocalCandidateHdlr = func(*ICECandidate) {}
 	}
 
-	isTrickle := g.agentIsTrickle
+	//whether we are trickled or not - we need ICE candidates
+
+	//isTrickle := g.agentIsTrickle
 	agent := g.agent
 	g.lock.Unlock()
 
-	if !isTrickle {
-		return nil
-	}
+
+	//if !isTrickle {
+	//	return nil
+	//}
 
 	g.setState(ICEGathererStateGathering)
 	if err := agent.OnCandidate(func(candidate ice.Candidate) {

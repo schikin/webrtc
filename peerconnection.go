@@ -8,11 +8,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
+	"github.com/pion/ice"
 	mathRand "math/rand"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/logging"
@@ -22,6 +24,16 @@ import (
 	"github.com/pion/webrtc/v2/internal/util"
 	"github.com/pion/webrtc/v2/pkg/rtcerr"
 )
+
+//Corresponds to 1 media section in an SDP
+type MediaStream struct {
+	DTLSTransport *DTLSTransport
+	iceAgent	  *ice.Agent
+
+	//either SCTP or RTP (or group of RTPs in case of bundling
+	RTPTransceivers	[]RTPTransceiver
+	SCTPTransport *SCTPTransport
+}
 
 // PeerConnection represents a WebRTC connection that establishes a
 // peer-to-peer communications with another PeerConnection instance in a
@@ -49,6 +61,7 @@ type PeerConnection struct {
 	lastAnswer string
 
 	rtpTransceivers []*RTPTransceiver
+	rtpTransceiversIdx	  map[string]*RTPTransceiver
 
 	// DataChannels
 	dataChannels          map[uint16]*DataChannel
@@ -60,11 +73,17 @@ type PeerConnection struct {
 	onICEConnectionStateChangeHandler func(ICEConnectionState)
 	onTrackHandler                    func(*Track, *RTPReceiver)
 	onDataChannelHandler              func(*DataChannel)
+	onICECandidateHandler			  func(candidate *ICECandidate)
+	onICEGatheringStateHandler		  func(ICEGathererState)
 
-	iceGatherer   *ICEGatherer
-	iceTransport  *ICETransport
-	dtlsTransport *DTLSTransport
-	sctpTransport *SCTPTransport
+	MediaStreams	[]MediaStream
+
+	//iceGatherer   *ICEGatherer
+	//iceTransport  *ICETransport
+	//dtlsTransport *DTLSTransport
+	//sctpTransport *SCTPTransport
+	iceCandidates	chan *ICECandidate
+
 
 	// A reference to the associated API state used by this connection
 	api *API
@@ -78,6 +97,12 @@ func NewPeerConnection(configuration Configuration) (*PeerConnection, error) {
 	m.RegisterDefaultCodecs()
 	api := NewAPI(WithMediaEngine(m))
 	return api.NewPeerConnection(configuration)
+}
+
+func (pc *PeerConnection) findTransceiverByMid(mid string) *RTPTransceiver {
+	ret, _ := pc.rtpTransceiversIdx[mid]
+
+	return ret
 }
 
 // NewPeerConnection creates a new PeerConnection with the provided configuration against the received API object
@@ -113,27 +138,27 @@ func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection,
 		return nil, err
 	}
 
-	pc.iceGatherer, err = pc.createICEGatherer()
-	if err != nil {
-		return nil, err
-	}
-
-	if !pc.iceGatherer.agentIsTrickle {
-		if err = pc.iceGatherer.Gather(); err != nil {
-			return nil, err
-		}
-	}
+	//pc.iceGatherer, err = pc.createICEGatherer()
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//if !pc.iceGatherer.agentIsTrickle {
+	//	if err = pc.iceGatherer.Gather(); err != nil {
+	//		return nil, err
+	//	}
+	//}
 
 	// Create the ice transport
-	iceTransport := pc.createICETransport()
-	pc.iceTransport = iceTransport
+	//iceTransport := pc.createICETransport()
+	//pc.iceTransport = iceTransport
 
 	// Create the DTLS transport
-	dtlsTransport, err := pc.api.NewDTLSTransport(pc.iceTransport, pc.configuration.Certificates)
-	if err != nil {
-		return nil, err
-	}
-	pc.dtlsTransport = dtlsTransport
+	//dtlsTransport, err := pc.api.NewDTLSTransport(pc.iceTransport, pc.configuration.Certificates)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//pc.dtlsTransport = dtlsTransport
 
 	return pc, nil
 }
@@ -240,14 +265,21 @@ func (pc *PeerConnection) OnDataChannel(f func(*DataChannel)) {
 // OnICECandidate sets an event handler which is invoked when a new ICE
 // candidate is found.
 func (pc *PeerConnection) OnICECandidate(f func(*ICECandidate)) {
-	pc.iceGatherer.OnLocalCandidate(f)
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+
+	pc.onICECandidateHandler = f
 }
 
 // OnICEGatheringStateChange sets an event handler which is invoked when the
 // ICE candidate gathering state has changed.
 func (pc *PeerConnection) OnICEGatheringStateChange(f func(ICEGathererState)) {
-	pc.iceGatherer.OnStateChange(f)
-}
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+
+	pc.onICEGatheringStateHandler = f
+
+	}
 
 // OnTrack sets an event handler which is called when remote track
 // arrives from a remote peer.
@@ -409,14 +441,10 @@ func (pc *PeerConnection) CreateOffer(options *OfferOptions) (SessionDescription
 		return SessionDescription{}, err
 	}
 
-	iceParams, err := pc.iceGatherer.GetLocalParameters()
-	if err != nil {
-		return SessionDescription{}, err
-	}
-
-	candidates, err := pc.iceGatherer.GetLocalCandidates()
-	if err != nil {
-		return SessionDescription{}, err
+	//if not trickled mode - need to gather ICE candidates before SDP can be created
+	//not supported for now
+	if(!pc.api.settingEngine.candidates.ICETrickle) {
+		panic("Non-trickled ICE mode is not supported")
 	}
 
 	bundleValue := "BUNDLE"
@@ -439,13 +467,13 @@ func (pc *PeerConnection) CreateOffer(options *OfferOptions) (SessionDescription
 		}
 
 		if len(video) > 0 {
-			if err = pc.addTransceiverSDP(d, "video", iceParams, candidates, sdp.ConnectionRoleActpass, video...); err != nil {
+			if err := pc.addTransceiverSDP(d, "video", sdp.ConnectionRoleActpass, video...); err != nil {
 				return SessionDescription{}, err
 			}
 			appendBundle("video")
 		}
 		if len(audio) > 0 {
-			if err = pc.addTransceiverSDP(d, "audio", iceParams, candidates, sdp.ConnectionRoleActpass, audio...); err != nil {
+			if err := pc.addTransceiverSDP(d, "audio", sdp.ConnectionRoleActpass, audio...); err != nil {
 				return SessionDescription{}, err
 			}
 			appendBundle("audio")
@@ -453,19 +481,28 @@ func (pc *PeerConnection) CreateOffer(options *OfferOptions) (SessionDescription
 	} else {
 		for _, t := range pc.GetTransceivers() {
 			midValue := strconv.Itoa(bundleCount)
-			if err = pc.addTransceiverSDP(d, midValue, iceParams, candidates, sdp.ConnectionRoleActpass, t); err != nil {
+			if err := pc.addTransceiverSDP(d, midValue, sdp.ConnectionRoleActpass, t); err != nil {
 				return SessionDescription{}, err
 			}
 			appendBundle(midValue)
 		}
 	}
 
-	midValue := strconv.Itoa(bundleCount)
-	if pc.configuration.SDPSemantics == SDPSemanticsPlanB {
-		midValue = "data"
+	if(len(pc.dataChannels)>0){
+		//if data channel is requested - create application channel, otherwise - don't
+
+		midValue := strconv.Itoa(bundleCount)
+		if pc.configuration.SDPSemantics == SDPSemanticsPlanB {
+			midValue = "data"
+		}
+
+
+
+		pc.addDataMediaSection(d, midValue, sdp.ConnectionRoleActpass)
+		appendBundle(midValue)
 	}
-	pc.addDataMediaSection(d, midValue, iceParams, candidates, sdp.ConnectionRoleActpass)
-	appendBundle(midValue)
+
+
 
 	d = d.WithValueAttribute(sdp.AttrKeyGroup, bundleValue)
 
@@ -819,6 +856,10 @@ func (pc *PeerConnection) SetLocalDescription(desc SessionDescription) error {
 	}
 	if err := pc.setDescription(&desc, stateChangeOpSetLocal); err != nil {
 		return err
+	}
+
+	for _, media := range desc.parsed.MediaDescriptions {
+
 	}
 
 	// To support all unittests which are following the future trickle=true
@@ -1645,10 +1686,13 @@ func (pc *PeerConnection) addFingerprint(d *sdp.SessionDescription) error {
 	return nil
 }
 
-func (pc *PeerConnection) addTransceiverSDP(d *sdp.SessionDescription, midValue string, iceParams ICEParameters, candidates []ICECandidate, dtlsRole sdp.ConnectionRole, transceivers ...*RTPTransceiver) error {
+func (pc *PeerConnection) addTransceiverSDP(d *sdp.SessionDescription, midValue string, dtlsRole sdp.ConnectionRole, transceivers ...*RTPTransceiver) error {
 	if len(transceivers) < 1 {
 		return fmt.Errorf("addTransceiverSDP() called with 0 transceivers")
 	}
+
+	iceParams := generateIceParams()
+
 	// Use the first transceiver to generate the section attributes
 	t := transceivers[0]
 	media := sdp.NewJSEPMediaDescription(t.kind.String(), []string{}).
@@ -1692,13 +1736,16 @@ func (pc *PeerConnection) addTransceiverSDP(d *sdp.SessionDescription, midValue 
 
 	media = media.WithPropertyAttribute(t.Direction.String())
 
-	addCandidatesToMediaDescriptions(candidates, media)
+	//non-trickle not supported
+	//addCandidatesToMediaDescriptions(candidates, media)
 	d.WithMedia(media)
 
 	return nil
 }
 
-func (pc *PeerConnection) addDataMediaSection(d *sdp.SessionDescription, midValue string, iceParams ICEParameters, candidates []ICECandidate, dtlsRole sdp.ConnectionRole) {
+func (pc *PeerConnection) addDataMediaSection(d *sdp.SessionDescription, midValue string, dtlsRole sdp.ConnectionRole) {
+	iceParams := generateIceParams();
+
 	media := (&sdp.MediaDescription{
 		MediaName: sdp.MediaName{
 			Media:   "application",
@@ -1720,7 +1767,7 @@ func (pc *PeerConnection) addDataMediaSection(d *sdp.SessionDescription, midValu
 		WithPropertyAttribute("sctpmap:5000 webrtc-datachannel 1024").
 		WithICECredentials(iceParams.UsernameFragment, iceParams.Password)
 
-	addCandidatesToMediaDescriptions(candidates, media)
+	//addCandidatesToMediaDescriptions(candidates, media)
 	d.WithMedia(media)
 }
 
