@@ -26,11 +26,9 @@ type RTPSender struct {
 }
 
 // NewRTPSender constructs a new RTPSender
-func (api *API) NewRTPSender(track *Track, transport *DTLSTransport) (*RTPSender, error) {
+func (api *API) NewRTPSender(track *Track) (*RTPSender, error) {
 	if track == nil {
 		return nil, fmt.Errorf("Track must not be nil")
-	} else if transport == nil {
-		return nil, fmt.Errorf("DTLSTransport must not be nil")
 	}
 
 	track.mu.RLock()
@@ -42,7 +40,7 @@ func (api *API) NewRTPSender(track *Track, transport *DTLSTransport) (*RTPSender
 
 	return &RTPSender{
 		track:      track,
-		transport:  transport,
+		transport:  nil,
 		api:        api,
 		sendCalled: make(chan interface{}),
 		stopCalled: make(chan interface{}),

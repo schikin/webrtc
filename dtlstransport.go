@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -252,6 +253,7 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 
 	t.onStateChange(DTLSTransportStateConnecting)
 	if t.isClient() {
+		log.Printf("Starting DTLS active")
 		// Assumes the peer offered to be passive and we accepted.
 		dtlsConn, err := dtls.Client(dtlsEndpoint, dtlsCofig)
 		if err != nil {
@@ -260,6 +262,8 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 		}
 		t.conn = dtlsConn
 	} else {
+		log.Printf("Starting DTLS passive")
+
 		// Assumes we offer to be passive and this is accepted.
 		dtlsConn, err := dtls.Server(dtlsEndpoint, dtlsCofig)
 		if err != nil {

@@ -16,3 +16,5 @@ require (
 	github.com/pion/transport v0.8.6
 	github.com/stretchr/testify v1.3.0
 )
+
+replace github.com/pion/sdp/v2 v2.3.0 => ../sdp

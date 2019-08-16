@@ -28,14 +28,10 @@ type RTPReceiver struct {
 }
 
 // NewRTPReceiver constructs a new RTPReceiver
-func (api *API) NewRTPReceiver(kind RTPCodecType, transport *DTLSTransport) (*RTPReceiver, error) {
-	if transport == nil {
-		return nil, fmt.Errorf("DTLSTransport must not be nil")
-	}
-
+func (api *API) NewRTPReceiver(kind RTPCodecType) (*RTPReceiver, error) {
 	return &RTPReceiver{
 		kind:      kind,
-		transport: transport,
+		transport: nil,
 		api:       api,
 		closed:    make(chan interface{}),
 		received:  make(chan interface{}),

@@ -96,7 +96,7 @@ func TestPeerConnection_Close_PreICE(t *testing.T) {
 	}
 
 	for {
-		if pcAnswer.iceTransport.State() == ICETransportStateChecking {
+		if pcAnswer.iceTransportState == ICETransportStateChecking {
 			break
 		}
 		time.Sleep(time.Second)
@@ -109,7 +109,7 @@ func TestPeerConnection_Close_PreICE(t *testing.T) {
 
 	// Assert that ICETransport is shutdown, test timeout will prevent deadlock
 	for {
-		if pcAnswer.iceTransport.State() == ICETransportStateClosed {
+		if pcAnswer.iceTransportState == ICETransportStateClosed {
 			time.Sleep(time.Second * 3)
 			return
 		}

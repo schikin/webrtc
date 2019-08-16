@@ -75,7 +75,7 @@ a=setup:%s
 	for _, testCase := range testCases {
 		assert.Equal(t,
 			testCase.expectedRole,
-			dtlsRoleFromRemoteSDP(testCase.sessionDescription),
+			dtlsRoleFromMediaSection(testCase.sessionDescription.MediaDescriptions[0]),
 			"TestDTLSRoleFromSDP (%s)", testCase.test,
 		)
 	}

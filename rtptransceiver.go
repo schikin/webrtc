@@ -17,7 +17,15 @@ type RTPTransceiver struct {
 	// receptive bool
 	stopped bool
 	kind    RTPCodecType
-	iceParams ICEParameters
+
+	localDtlsRole	DTLSRole //dtls role from local SDP
+	remoteDtlsRole	DTLSRole //dtls roe from remote SDP
+
+	localBundled	bool //transceiver bundled in local SDP
+	remoteBundled	bool //transceiver bundled in remote SDP
+
+	bundled	bool	//bundling commenced by both sides
+	dtlsRole DTLSRole //commenced DTLS role
 
 	Mid string
 	LocalMediaDescription *sdp.MediaDescription
